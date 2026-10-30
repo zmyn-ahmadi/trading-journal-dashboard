@@ -1,124 +1,70 @@
-# cTrader Open API Client
+# Trading Journal Dashboard
 
-A Python application to connect to the cTrader trading platform via Open API (TCP/Protobuf).
+An automatic trading journal. A background service records every cTrader trade to PostgreSQL, and a web dashboard shows how those trades performed.
+
+**[Try the live demo](https://zmyn-ahmadi.github.io/trading-journal-dashboard/)**: it runs in your browser on invented sample trades, with no backend, and notes reset when you reload.
+
+![Dashboard overview](docs/screenshots/overview.png)
+
+| Trade log | Trade detail |
+| --- | --- |
+| ![Trade log](docs/screenshots/trade-log.png) | ![Trade detail](docs/screenshots/trade-detail.png) |
 
 ## Features
 
-- **OAuth 2.0 token flow** — local callback server handles the redirect
-- **Account discovery** — lists all trading accounts linked to your cTID
-- **Open positions** — symbol, side, volume, entry price, SL/TP, swap
-- **Pending orders** — limit, stop, stop-limit orders with details
-- **Deal history** — last 7 days of executed trades with P&L
-- **Live execution events** — real-time feed of position opens/closes/modifications
+- **Automatic recording:** connects to the cTrader Open API, backfills past trades on startup, records new ones as they happen and reconnects after a dropped connection. It's read-only and never places or changes trades.
+- **Performance stats:** net P&L, win rate, profit factor, average win and loss, and an equity curve, filtered by period.
+- **Breakdowns:** results by trading session and symbol, plus a calendar of daily P&L.
+- **Trade log:** filter by symbol, side, session and status, then open a trade to add notes and chart screenshots.
+- **Command line:** `journal_cli.py` shows the same data in a terminal.
+- **Live chart display:** a relay streams market data over WebSocket to an ESP32 with a TFT screen.
 
-## Prerequisites
+## How it works
 
-1. An approved cTrader Open API application ([register here](https://openapi.ctrader.com))
-2. Python 3.10+
+```
+cTrader Open API
+      │  TCP, SSL, Protobuf
+      ▼
+journal_daemon.py ──► PostgreSQL ◄── FastAPI (api/main.py) ◄── React dashboard
+      
+relay_server.py ──► WebSocket ──► ESP32 TFT display
+```
 
-## Setup
+More detail is in [`docs/DAEMON_DOCS.md`](docs/DAEMON_DOCS.md).
+
+## Built with
+
+Python, FastAPI, SQLAlchemy, PostgreSQL, Twisted, React, Vite, Recharts, and C++ on the ESP32.
+
+## Run it locally
+
+You need Python 3.10+, Node.js, PostgreSQL and an approved [cTrader Open API application](https://openapi.ctrader.com).
 
 ```bash
-# Clone / copy files, then:
-cd trading-journal-dashboard
-
-# Install dependencies
 pip install -r requirements.txt
-
-# Configure credentials
-cp .env.example .env
-# Edit .env with your CLIENT_ID, CLIENT_SECRET, REDIRECT_URI
+cp .env.example .env        # add your cTrader credentials and DATABASE_URL
+python get_token.py         # one-time login, saves tokens.json
+python journal_daemon.py    # records trades
 ```
 
-## Usage
-
-### Step 1: Get your access token (one-time)
+In a second terminal, start the API:
 
 ```bash
-python get_token.py
+uvicorn api.main:app --reload
 ```
 
-This opens your browser → you log in with your cTrader ID → grant access →
-tokens are saved to `tokens.json`. Run again to refresh expired tokens.
-
-### Step 2: Run the client
+In a third, start the dashboard, then open http://localhost:5173:
 
 ```bash
-python ctrader_client.py
+cd dashboard
+npm install
+npm run dev
 ```
 
-Output:
-
-```
-=== cTrader Open API Client ===
-
-  Server:  demo.ctraderapi.com:5035 (DEMO)
-  Token:   mos8Bw3D4EG0fRPd4E...
-
-───── Step 1: App Authentication ──────────────────────
-  App authenticated successfully
-
-───── Step 2: Fetching Accounts ───────────────────────
-  Found 2 account(s):
-    [0] Account ID: 12345678  |  DEMO  |  Broker: 1104926
-    [1] Account ID: 87654321  |  LIVE  |  Broker: 1104927
-
-───── Open Positions & Pending Orders ─────────────────
-  Open Positions (3):
-  Symbol       Side   Volume     Entry Price    SL           TP           ...
-  EURUSD       BUY    100000.00  1.08450        1.08200      1.09000      ...
-
-───── Live Events (listening...) ──────────────────────
-  [14:32:05] ORDER_FILLED: GBPUSD SELL 50000.00 @ 1.27320
-```
-
-## File Structure
-
-```
-trading-journal-dashboard/
-├── README.md
-
-├── api
-│   ├── __init__.py
-│   └── main.py
-
-├── dashboard
-│   ├── eslint.config.js
-│   ├── index.html
-│   ├── package-lock.json
-│   ├── package.json
-│   ├── src
-│   │   ├── App.jsx
-│   │   └── main.jsx
-│   └── vite.config.js
-├── docs
-│   └── DAEMON_DOCS.md
-├── get_token.py
-├── journal
-│   ├── __init__.py
-│   ├── ctrader_client.py
-│   ├── models.py
-│   ├── recorder.py
-│   └── sessions.py
-
-├── journal_cli.py
-├── journal_daemon.py
-
-├── live-chart-tft
-│   ├── ctrader_tft_chart.ino
-│   ├── relay_server.py
-│   └── requirements.txt
-
-├── requirements.txt
-├── tokens.json
-└── uploads
-    └── screenshots
-
-```
+To run the sample-data version without any of that, use `VITE_DEMO=1 npm run dev` in `dashboard/`.
 
 ## Notes
 
-- **Heartbeat**: The SDK handles heartbeat internally (every 10s)
-- **Rate limits**: Max 50 requests/sec for general data, 5 req/sec for historical
-- **Token expiry**: Access tokens last ~30 days; run `python get_token.py` to refresh
-- **Live vs Demo**: Set `ACCOUNT_TYPE=live` or `ACCOUNT_TYPE=demo` in `.env`
+- cTrader access tokens last about 30 days. Run `python get_token.py` to refresh.
+- Set `ACCOUNT_TYPE` to `live` or `demo` in `.env`.
+- Run the demo data tests with `npm test` in `dashboard/`.
